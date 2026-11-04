@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#07060f">
+<title>Né Đi! – One Tap Survival</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c"></canvas>
+
+  <!-- MENU -->
+  <div id="menu" class="overlay">
+    <div class="panel">
+      <h1>NÉ ĐI!</h1>
+      <p class="sub">Chạm để nhảy · Chạm lần nữa trên không để <b>nhảy đôi</b><br>Né vật thể rơi · Đừng để <span class="hot">dung nham</span> đuổi kịp</p>
+      <div class="legend" id="legend"></div>
+      <div class="card" id="mDaily"></div>
+      <div class="best" id="mBest"></div>
+      <button id="bStart" class="primary">CHẠM ĐỂ CHƠI</button>
+      <div class="titles" id="mTitles"></div>
+    </div>
+  </div>
+
+  <!-- GAME OVER -->
+  <div id="over" class="overlay hidden">
+    <div class="panel">
+      <div class="reason" id="oReason"></div>
+      <div class="big" id="oScore">0</div>
+      <div class="badge hidden" id="oBest">KỶ LỤC MỚI!</div>
+      <div class="stats" id="oStats"></div>
+      <div class="card" id="oDaily"></div>
+      <div class="titles" id="oTitles"></div>
+      <button id="bAgain" class="primary">Chơi lại</button>
+      <div class="row">
+        <button id="bReplay">▶ Replay 5s</button>
+        <button id="bShare">📸 Chia sẻ ảnh</button>
+      </div>
+      <button id="bClip">🎬 Lưu clip khoảnh khắc cuối</button>
+      <button id="bMenu" class="ghost">Menu</button>
+    </div>
+  </div>
+
+  <div id="toast" class="hidden"></div>
+</div>
+<script src="game.js"></script>
+</body>
+</html>
