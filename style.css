@@ -117,10 +117,10 @@ button:not(.primary):not(.ghost) {
   display: flex; justify-content: space-between; align-items: flex-end;
   padding: 0 4cqw; pointer-events: none;
 }
-#pad .grp { display: flex; gap: 3cqw; align-items: flex-end; }
+#pad .grp { display: flex; gap: 2cqw; align-items: flex-end; }
 #pad button {
   pointer-events: auto; touch-action: none;
-  width: 16cqw; height: 16cqw; padding: 0; border-radius: 50%;
+  width: 14cqw; height: 14cqw; padding: 0; border-radius: 50%;
   font-size: 6.5cqw; line-height: 1; color: #fff;
   background: rgba(20, 14, 48, .45);
   border: 1.5px solid rgba(255, 255, 255, .35);
@@ -128,8 +128,11 @@ button:not(.primary):not(.ghost) {
   box-shadow: 0 1cqw 3cqw rgba(0, 0, 0, .4);
 }
 #pad button.jump {
-  width: 20cqw; height: 20cqw; font-size: 8cqw;
+  width: 18cqw; height: 18cqw; font-size: 7.5cqw;
   border-color: rgba(94, 240, 255, .7); box-shadow: 0 0 4cqw rgba(94, 240, 255, .35);
+}
+#pad button.dash {
+  border-color: rgba(255, 224, 102, .7); box-shadow: 0 0 4cqw rgba(255, 224, 102, .3);
 }
 #pad button.on { background: rgba(94, 240, 255, .4); transform: scale(.92); }
 
