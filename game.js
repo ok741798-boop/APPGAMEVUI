@@ -13,6 +13,7 @@ const RUN = 165;                 // tốc độ chạy ngang tự động
 const MOVE = 230;                // tốc độ đi trái/phải bằng nút
 const input = { left: false, right: false, down: false };
 const inputDir = () => (input.right ? 1 : 0) - (input.left ? 1 : 0);
+const DASH_SPEED = 720, DASH_TIME = .16, DASH_INV = .3, DASH_CD = .8;   // lướt né
 const GROUND = H - 60;
 
 const $ = id => document.getElementById(id);
@@ -112,7 +113,7 @@ let pl, plats, objs, shocks, parts, texts, cam, lava, t, topY, spawnT, shake, sl
 let combo, comboT, run, frames, ghostRec, ghostT, bestGhost, deathT, deathReason, lastResult, lastCx;
 
 function reset() {
-  pl = { x: W / 2, y: GROUND - HALF, vx: 0, vy: 0, dir: 1, aim: 0, trail: [], onGround: true, coyote: 0, jumps: 0, sq: 1, alive: true, plat: null };
+  pl = { x: W / 2, y: GROUND - HALF, vx: 0, vy: 0, dir: 1, aim: 0, trail: [], dashT: 0, dashDir: 1, dashCD: 0, inv: 0, onGround: true, coyote: 0, jumps: 0, sq: 1, alive: true, plat: null };
   lastCx = W / 2;
   plats = [{ x: 0, y: GROUND, w: W, vx: 0, ground: true }];
   objs = []; shocks = []; parts = []; texts = [];
@@ -194,6 +195,24 @@ function jump() {
   }
 }
 
+// Lướt né: bấm ◀/▶ để lướt nhanh, miễn nhiễm va chạm trong chốc lát
+function dash(dir) {
+  if (mode !== 'play' || !pl.alive || pl.dashCD > 0) return;
+  pl.dashT = DASH_TIME; pl.dashDir = dir; pl.inv = DASH_INV; pl.dashCD = DASH_CD; pl.dir = dir;
+  burst(pl.x - dir * 10, pl.y, '#bff9ff', 10, 140);
+  sfx(900, .12, 'sawtooth', .035, -600);
+}
+
+// Lướt xuyên qua vật thể = né hoàn hảo
+function perfectDodge(o) {
+  if (o.perfect) return;
+  o.perfect = true; o.passed = true;
+  run.dodges++; run.nears++; combo++; comboT = 2.5; run.maxCombo = Math.max(run.maxCombo, combo);
+  const b = 10 * combo; run.bonus += b; slowT = .15;
+  floatText(pl.x, pl.y - 34, 'NÉ HOÀN HẢO! +' + b, '#9ff8ff', 18 + Math.min(combo, 8) * 2);
+  sfx(1100, .16, 'triangle', .07, 300);
+}
+
 function boxDist(cx, cy) {
   const dx = Math.max(Math.abs(cx - pl.x) - HALF, 0), dy = Math.max(Math.abs(cy - pl.y) - HALF, 0);
   return Math.hypot(dx, dy);
@@ -238,6 +257,13 @@ function update(dt) {
   if (pl.alive) {
     run.time = t;
     pl.vy = Math.min(pl.vy + G * dt, 1100);
+    pl.dashCD = Math.max(0, pl.dashCD - dt); pl.inv = Math.max(0, pl.inv - dt);
+    if (pl.dashT > 0) {
+      pl.dashT -= dt;
+      pl.x = clamp(pl.x + pl.dashDir * DASH_SPEED * dt, HALF, W - HALF);
+      if (!pl.onGround) { pl.vy = Math.min(pl.vy, 40); pl.vx = pl.dashDir * MOVE; }
+      if (Math.random() < .6) parts.push({ x: pl.x - pl.dashDir * 12, y: pl.y + rand(-8, 8), vx: -pl.dashDir * 60, vy: 0, life: .25, max: .25, s: 3, c: '#bff9ff' });
+    }
     // Đứng trên bục thì đứng yên, trừ khi giữ nút trái/phải
     const dirIn = inputDir();
     if (pl.onGround) {
@@ -325,7 +351,7 @@ function update(dt) {
     if (pl.alive) {
       if (o.vis) {
         const d = boxDist(o.x, o.y);
-        if (d < o.r - 2) die(o.type);
+        if (d < o.r - 2) { if (pl.inv > 0) perfectDodge(o); else die(o.type); }
         o.minD = Math.min(o.minD, d - o.r);
       }
       if (!o.passed && o.y - o.r > pl.y + HALF) {
@@ -341,7 +367,7 @@ function update(dt) {
   for (const s of shocks) {
     s.age += dt;
     s.r = s.max * (1 - Math.pow(1 - Math.min(1, s.age / .3), 3));
-    if (pl.alive && s.age < .32 && Math.hypot(pl.x - s.x, pl.y - s.y) < s.r + HALF * .6) die('bomb');
+    if (pl.alive && pl.inv <= 0 && s.age < .32 && Math.hypot(pl.x - s.x, pl.y - s.y) < s.r + HALF * .6) die('bomb');
   }
   shocks = shocks.filter(s => s.age < .6);
 
@@ -365,9 +391,9 @@ function ghostPos() {
 function snap() {
   return {
     cam, lava, shake, t,
-    p: pl.alive ? [pl.x, pl.y, pl.dir, pl.sq, pl.onGround ? 1 : 0] : null,
+    p: pl.alive ? [pl.x, pl.y, pl.dir, pl.sq, pl.onGround ? 1 : 0, pl.inv > 0 ? 1 : 0, pl.dashCD / DASH_CD] : null,
     aim: pl.alive && pl.onGround ? [pl.x, pl.y, pl.aim] : null,
-    trail: pl.alive && !pl.onGround ? pl.trail.slice() : [],
+    trail: pl.alive && (!pl.onGround || pl.dashT > 0) ? pl.trail.slice() : [],
     g: ghostPos(),
     plats: plats.filter(p => p.y > cam - 30 && p.y < cam + H + 30).map(p => [p.x, p.y, p.w, p.vx ? 1 : 0, p.ground ? 1 : 0]),
     objs: objs.map(o => [o.type, o.x, o.y, o.r, o.vis ? 1 : 0, o.t]),
@@ -535,7 +561,18 @@ function render(s, opt = {}) {
   ctx.globalAlpha = 1;
 
   (s.trail || []).forEach(([tx, ty], i, a) => drawBody(tx, ty, 1, 1, .05 + i / a.length * .15, '#5ef0ff'));
-  if (s.p) drawBody(s.p[0], s.p[1], s.p[2], s.p[3], 1, '#5ef0ff');
+  if (s.p) {
+    const [px, py, pd, psq, , inv, cd] = s.p;
+    if (inv) {   // vòng khiên khi đang lướt né
+      ctx.save(); ctx.strokeStyle = '#bff9ff'; ctx.lineWidth = 2; ctx.shadowColor = '#5ef0ff'; ctx.shadowBlur = 14;
+      ctx.globalAlpha = .7; ctx.beginPath(); ctx.arc(px, py, HALF + 8, 0, 7); ctx.stroke(); ctx.restore();
+    }
+    drawBody(px, py, pd, psq, 1, inv ? '#e6feff' : '#5ef0ff');
+    if (cd > 0) {   // thanh hồi chiêu lướt né
+      ctx.fillStyle = 'rgba(0,0,0,.45)'; rr(px - 14, py + HALF + 5, 28, 4, 2); ctx.fill();
+      ctx.fillStyle = '#5ef0ff'; rr(px - 14, py + HALF + 5, 28 * (1 - cd), 4, 2); ctx.fill();
+    }
+  }
 
   for (const [x, y, sz, c, a] of s.parts) { ctx.globalAlpha = a; ctx.fillStyle = c; ctx.fillRect(x - sz / 2, y - sz / 2, sz, sz); }
   ctx.globalAlpha = 1;
@@ -760,7 +797,12 @@ wrap.addEventListener('pointerdown', e => {
 });
 const HOLD_KEYS = { ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right', ArrowDown: 'down', KeyS: 'down' };
 addEventListener('keydown', e => {
-  if (HOLD_KEYS[e.code]) { e.preventDefault(); input[HOLD_KEYS[e.code]] = true; return; }
+  if (HOLD_KEYS[e.code]) {
+    e.preventDefault();
+    const k = HOLD_KEYS[e.code];
+    if (!e.repeat && (k === 'left' || k === 'right')) dash(k === 'left' ? -1 : 1);
+    input[k] = true; return;
+  }
   if (!['Space', 'ArrowUp', 'KeyW', 'Enter'].includes(e.code)) return;
   e.preventDefault(); if (e.repeat) return;
   initAudio();
@@ -777,7 +819,10 @@ document.querySelectorAll('#pad button').forEach(b => {
     e.preventDefault(); e.stopPropagation();
     if (on) initAudio();
     if (k === 'up') { if (on && mode === 'play') jump(); }
-    else input[k] = on;
+    else {
+      if (on && !input[k] && (k === 'left' || k === 'right')) dash(k === 'left' ? -1 : 1);
+      input[k] = on;
+    }
     b.classList.toggle('on', on);
   };
   b.addEventListener('pointerdown', press(true));
