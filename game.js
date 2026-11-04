@@ -10,6 +10,9 @@ const G = 2000;                  // trọng lực
 const JUMP = 760, AIR = 640;     // lực nhảy / nhảy đôi
 const HALF = 11;                 // nửa cạnh nhân vật
 const RUN = 165;                 // tốc độ chạy ngang tự động
+const MOVE = 230;                // tốc độ đi trái/phải bằng nút
+const input = { left: false, right: false, down: false };
+const inputDir = () => (input.right ? 1 : 0) - (input.left ? 1 : 0);
 const GROUND = H - 60;
 
 const $ = id => document.getElementById(id);
@@ -182,7 +185,7 @@ function aimVx() {
 function jump() {
   if (!pl.alive) return;
   if (pl.onGround || pl.coyote > 0) {
-    pl.vx = aimVx(); if (Math.abs(pl.vx) > 5) pl.dir = Math.sign(pl.vx);
+    pl.vx = inputDir() ? inputDir() * MOVE : aimVx(); if (Math.abs(pl.vx) > 5) pl.dir = Math.sign(pl.vx);
     pl.vy = -JUMP; pl.jumps = 1; pl.onGround = false; pl.coyote = 0; pl.sq = 1.35;
     sfx(420, .09, 'square', .045, 300); burst(pl.x, pl.y + HALF, '#cfeaff', 6, 120);
   } else if (pl.jumps < 2) {
@@ -235,17 +238,26 @@ function update(dt) {
   if (pl.alive) {
     run.time = t;
     pl.vy = Math.min(pl.vy + G * dt, 1100);
-    // Đứng trên bục thì đứng yên, chỉ di chuyển ngang khi đang bay
-    if (!pl.onGround) {
+    // Đứng trên bục thì đứng yên, trừ khi giữ nút trái/phải
+    const dirIn = inputDir();
+    if (pl.onGround) {
+      if (dirIn) { pl.x = clamp(pl.x + dirIn * MOVE * dt, HALF, W - HALF); pl.dir = dirIn; }
+      // Nút xuống: rơi xuyên qua bục (trừ mặt đất)
+      if (input.down && !pl.plat.ground) { pl.dropPlat = pl.plat; pl.dropT = .25; pl.onGround = false; pl.vy = 120; }
+    } else {
+      if (dirIn) pl.vx += (dirIn * MOVE - pl.vx) * Math.min(1, dt * 10);
+      if (input.down) pl.vy = Math.max(pl.vy, 750);   // lao xuống nhanh
       pl.x += pl.vx * dt;
       if (pl.x < HALF) { pl.x = HALF; pl.vx = Math.abs(pl.vx); }
       else if (pl.x > W - HALF) { pl.x = W - HALF; pl.vx = -Math.abs(pl.vx); }
       if (Math.abs(pl.vx) > 5) pl.dir = Math.sign(pl.vx);
     }
+    pl.dropT = Math.max(0, (pl.dropT || 0) - dt);
     const prevBottom = pl.y + HALF, fallV = pl.vy, was = pl.onGround;
     pl.y += pl.vy * dt;
     pl.onGround = false;
     if (pl.vy >= 0) for (const p of plats) {
+      if (pl.dropT > 0 && p === pl.dropPlat) continue;
       if (pl.x + HALF > p.x && pl.x - HALF < p.x + p.w && prevBottom <= p.y + 1 && pl.y + HALF >= p.y) {
         pl.y = p.y - HALF; pl.vy = 0; pl.onGround = true; pl.jumps = 0; pl.plat = p;
         if (!was && fallV > 400) { pl.sq = .7; burst(pl.x, p.y, '#8f88d6', 5, 90); }
@@ -601,7 +613,7 @@ function render(s, opt = {}) {
 
 // ---------- Kết thúc lượt ----------
 function gameOver() {
-  mode = 'over';
+  mode = 'over'; $('pad').classList.add('hidden');
   const score = curScore(), before = new Set(unlockedTitles());
   const newBest = score > stats.bestScore;
   stats.runs++; stats.dodges += run.dodges; stats.nears += run.nears;
@@ -635,7 +647,7 @@ function gameOver() {
 function currentTitle() { const u = unlockedTitles(); return u[u.length - 1] || 'Tân binh'; }
 
 function showMenu() {
-  mode = 'menu'; reset();
+  mode = 'menu'; reset(); $('pad').classList.add('hidden');
   $('over').classList.add('hidden'); $('menu').classList.remove('hidden');
   $('legend').innerHTML = Object.values(TYPES)
     .map(o => `<div><i style="background:${o.color};color:${o.color}"></i><span><b>${o.name}</b>${o.desc}</span></div>`).join('');
@@ -647,7 +659,8 @@ function showMenu() {
 
 function start() {
   initAudio(); reset(); mode = 'play';
-  $('menu').classList.add('hidden'); $('over').classList.add('hidden');
+  input.left = input.right = input.down = false;
+  $('menu').classList.add('hidden'); $('over').classList.add('hidden'); $('pad').classList.remove('hidden');
 }
 
 // ---------- Replay & quay clip ----------
@@ -745,12 +758,31 @@ wrap.addEventListener('pointerdown', e => {
   if (mode === 'play') { jump(); e.preventDefault(); }
   else if (mode === 'replay' && !rp.record) rp.rt = rp.end;
 });
+const HOLD_KEYS = { ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right', ArrowDown: 'down', KeyS: 'down' };
 addEventListener('keydown', e => {
+  if (HOLD_KEYS[e.code]) { e.preventDefault(); input[HOLD_KEYS[e.code]] = true; return; }
   if (!['Space', 'ArrowUp', 'KeyW', 'Enter'].includes(e.code)) return;
   e.preventDefault(); if (e.repeat) return;
   initAudio();
   if (mode === 'play') jump();
   else if (mode === 'menu' || mode === 'over') start();
+});
+addEventListener('keyup', e => { if (HOLD_KEYS[e.code]) input[HOLD_KEYS[e.code]] = false; });
+addEventListener('blur', () => { input.left = input.right = input.down = false; });
+
+// Nút cảm ứng: ◀ ▶ ▼ giữ để di chuyển, ▲ để nhảy
+document.querySelectorAll('#pad button').forEach(b => {
+  const k = b.dataset.k;
+  const press = on => e => {
+    e.preventDefault(); e.stopPropagation();
+    if (on) initAudio();
+    if (k === 'up') { if (on && mode === 'play') jump(); }
+    else input[k] = on;
+    b.classList.toggle('on', on);
+  };
+  b.addEventListener('pointerdown', press(true));
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => b.addEventListener(ev, press(false)));
+  b.addEventListener('contextmenu', e => e.preventDefault());
 });
 $('bStart').onclick = start;
 $('bAgain').onclick = start;

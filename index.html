@@ -16,7 +16,7 @@
     <div class="panel">
       <h1>NÉ ĐI!</h1>
       <p class="tag">SINH TỒN CHỈ VỚI MỘT LẦN CHẠM</p>
-      <p class="sub">Đứng trên bục · <b>Chạm</b> để bật lên bục kế tiếp · Chạm lần nữa trên không để <b>nhảy đôi</b><br>Né vật thể rơi · Đừng để <span class="hot">dung nham</span> đuổi kịp</p>
+      <p class="sub">Đứng trên bục · <b>Chạm</b> để bật lên bục kế tiếp · Chạm lần nữa trên không để <b>nhảy đôi</b><br>Nút <b>◀ ▶</b> đi trái/phải · <b>▼</b> rơi xuyên bục / lao xuống (phím mũi tên hoặc WASD)<br>Né vật thể rơi · Đừng để <span class="hot">dung nham</span> đuổi kịp</p>
       <div class="legend" id="legend"></div>
       <div class="card" id="mDaily"></div>
       <div class="best" id="mBest"></div>
@@ -41,6 +41,18 @@
       </div>
       <button id="bClip">🎬 Lưu clip khoảnh khắc cuối</button>
       <button id="bMenu" class="ghost">Menu</button>
+    </div>
+  </div>
+
+  <!-- NÚT ĐIỀU KHIỂN -->
+  <div id="pad" class="hidden">
+    <div class="grp">
+      <button data-k="left" aria-label="Trái">◀</button>
+      <button data-k="right" aria-label="Phải">▶</button>
+    </div>
+    <div class="grp">
+      <button data-k="down" aria-label="Xuống">▼</button>
+      <button data-k="up" class="jump" aria-label="Nhảy">▲</button>
     </div>
   </div>
 
