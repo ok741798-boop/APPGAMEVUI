@@ -106,7 +106,13 @@ function sfx(f, d = .1, type = 'square', v = .05, slide = 0) {
 
 // ---------- Kích thước màn hình (điện thoại / laptop / PC) ----------
 let scale = 1;
-let lowFx = false;   // chế độ mượt cho máy yếu: tắt hiệu ứng phát sáng, giảm độ phân giải
+// Mức chất lượng tự động theo cấu hình máy: 0 cao, 1 vừa, 2 thấp (máy yếu)
+let tier = 0;
+let lowFx = false;   // = tier 2: tắt hiệu ứng phát sáng
+const TIER_DPR = [2, 1.5, 1];          // độ phân giải render tối đa
+const TIER_PART = [400, 180, 80];      // số hạt hiệu ứng tối đa cùng lúc
+const TIER_BURST = [1, .6, .35];       // tỉ lệ hạt mỗi lần nổ / nhảy
+const MAX_PIXELS = 3.7e6;              // ~2560x1440: màn 4K không vẽ thừa điểm ảnh gây nặng máy
 const ZOOMS = [1, 1.25, 1.5];
 let zoom = ZOOMS.includes(store.get('zoom', 1.25)) ? store.get('zoom', 1.25) : 1.25;   // mức phóng to màn hình game
 
@@ -131,7 +137,7 @@ function resize() {
   const viewW = vw / ui;
   W = Math.round(Math.min(viewW, MAX_W)); H = Math.round(vh / ui);
   offX = (viewW - W) / 2;
-  const dpr = lowFx ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+  const dpr = Math.max(.75, Math.min(window.devicePixelRatio || 1, TIER_DPR[tier], Math.sqrt(MAX_PIXELS / (vw * vh))));
   cv.style.width = vw + 'px'; cv.style.height = vh + 'px';
   cv.width = Math.round(vw * dpr); cv.height = Math.round(vh * dpr);
   scale = ui * dpr;
@@ -280,7 +286,8 @@ function spawnInterval() {
 
 // ---------- Hiệu ứng ----------
 function burst(x, y, c, n, sp = 260) {
-  for (let i = 0; i < n; i++) {
+  n = Math.ceil(n * TIER_BURST[tier]);
+  for (let i = 0; i < n && parts.length < TIER_PART[tier]; i++) {
     const a = Math.random() * Math.PI * 2, v = rand(.3, 1) * sp, life = rand(.4, .9);
     parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 80, life, max: life, s: rand(2, 5), c });
   }
@@ -527,6 +534,7 @@ function update(dt) {
 
   for (const p of parts) { p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 600 * dt; p.life -= dt; }
   parts = parts.filter(p => p.life > 0);
+  if (parts.length > TIER_PART[tier]) parts.splice(0, parts.length - TIER_PART[tier]);   // giới hạn theo cấu hình máy
   for (const x of texts) { x.y -= 40 * dt; x.life -= dt; }
   texts = texts.filter(x => x.life > 0);
   shake = Math.max(0, shake - dt * 30);
@@ -1280,14 +1288,20 @@ const STEP = 1 / 120;
 let last = performance.now(), acc = 0;
 let ftAvg = 16, slowFor = 0;
 function loop(now) {
+  // Giới hạn 60 khung hình/giây: màn 120/144Hz không vẽ thừa → đỡ tốn pin, đỡ nóng máy
+  if (now - last < 1000 / 62) { requestAnimationFrame(loop); return; }
   const ms = Math.min(100, now - last);
   const raw = Math.min(.033, ms / 1000); last = now;
   pollGamepad();
-  // Tự bật chế độ mượt nếu máy chạy chậm (< ~42 fps) liên tục 2 giây
-  if (mode === 'play' && !lowFx) {
+  // Máy chạy chậm (< ~42 fps) liên tục 2 giây → hạ một mức chất lượng (cao → vừa → thấp)
+  if (mode === 'play' && tier < 2) {
     ftAvg = ftAvg * .95 + ms * .05;
     slowFor = ftAvg > 24 ? slowFor + raw : 0;
-    if (slowFor > 2) { lowFx = true; resize(); toast('⚡ Đã bật chế độ mượt cho máy yếu'); }
+    if (slowFor > 2) {
+      tier++; lowFx = tier >= 2; slowFor = 0; ftAvg = 16;
+      resize();
+      toast(tier === 1 ? '⚡ Đã giảm hiệu ứng cho mượt hơn' : '⚡ Đã bật chế độ mượt cho máy yếu');
+    }
   }
   if (mode === 'play' || mode === 'dying') {
     acc += raw * (slowT > 0 ? .35 : 1); slowT -= raw;
