@@ -178,6 +178,9 @@ body:not(.touch) #pad { display: none; }
 }
 
 /* Nút góc: tạm dừng / toàn màn hình */
+.settings button { font-size: calc(3.6 * var(--q)); padding: calc(2.2 * var(--q)); }
+body:not(.touch) .rot { display: none; }   /* xoay màn hình chỉ dành cho điện thoại / máy tính bảng */
+
 /* Đặt ngay dưới ô thời gian ở góc phải khung chơi, trên mọi kích thước màn hình */
 #ctl {
   position: fixed; top: calc(var(--u) * 66); right: calc(var(--offx) + var(--u) * 12);

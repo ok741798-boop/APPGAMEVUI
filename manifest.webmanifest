@@ -3,7 +3,7 @@
   "short_name": "Né Đi!",
   "start_url": "./",
   "display": "fullscreen",
-  "orientation": "portrait",
+  "orientation": "any",
   "background_color": "#07060f",
   "theme_color": "#07060f",
   "icons": [

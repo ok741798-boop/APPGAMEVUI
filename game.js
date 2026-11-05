@@ -107,6 +107,8 @@ function sfx(f, d = .1, type = 'square', v = .05, slide = 0) {
 // ---------- Kích thước màn hình (điện thoại / laptop / PC) ----------
 let scale = 1;
 let lowFx = false;   // chế độ mượt cho máy yếu: tắt hiệu ứng phát sáng, giảm độ phân giải
+const ZOOMS = [1, 1.25, 1.5];
+let zoom = ZOOMS.includes(store.get('zoom', 1.25)) ? store.get('zoom', 1.25) : 1.25;   // mức phóng to màn hình game
 
 // Khi bật lowFx, mọi lệnh shadowBlur bị bỏ qua (hiệu ứng glow tốn GPU nhất trên điện thoại yếu)
 const SB = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, 'shadowBlur');
@@ -121,7 +123,11 @@ function resize() {
   const vw = vv ? vv.width : innerWidth, vh = vv ? vv.height : innerHeight;
   // Canvas phủ kín màn hình. Khung chơi cao >= 760, rộng 380..900 đơn vị logic:
   //  điện thoại dài → thấy nhiều trời hơn; iPad/laptop → khung rộng ra; màn quá rộng → 2 bên trang trí
-  const ui = Math.min(vh / BASE_H, vw / MIN_W);   // số pixel CSS cho mỗi đơn vị logic
+  // Điện thoại xoay ngang (màn thấp): dùng khung thấp hơn để nhân vật không bị bé
+  const shortLand = vw > vh && vh < 600;
+  const fit = Math.min(vh / (shortLand ? 560 : BASE_H), vw / MIN_W);   // vừa khít, chưa phóng to
+  // Phóng to theo mức người chơi chọn, nhưng giữ khung tối thiểu để HUD và lối chơi không bị chật
+  const ui = Math.max(fit, Math.min(fit * zoom, vw / 360, vh / (shortLand ? 460 : 600)));   // số pixel CSS cho mỗi đơn vị logic
   const viewW = vw / ui;
   W = Math.round(Math.min(viewW, MAX_W)); H = Math.round(vh / ui);
   offX = (viewW - W) / 2;
@@ -139,6 +145,7 @@ function resize() {
 }
 function onResize() {
   resize();
+  if (mode === 'menu') reset();   // menu: đặt lại cảnh nền cho khớp khung mới
   if (pl) pl.x = clamp(pl.x, HALF, W - HALF);
   // Đổi kích thước làm xoá canvas: vẽ lại khung hình cuối khi đang dừng / game over
   if ((mode === 'over' || mode === 'pause') && frames.length) render(frames[frames.length - 1].s);
@@ -1049,6 +1056,35 @@ function toggleFullscreen() {
 }
 if (!reqFS) $('bFull').classList.add('hidden');   // iPhone không hỗ trợ: ẩn nút
 
+// ---------- Phóng to màn hình game ----------
+function updateZoomLabels() {
+  const pct = Math.round(zoom * 100) + '%';
+  $('bZoom').textContent = '🔍 Phóng to: ' + pct;
+  $('bZoom2').title = 'Phóng to: ' + pct;
+}
+function cycleZoom() {
+  zoom = ZOOMS[(ZOOMS.indexOf(zoom) + 1) % ZOOMS.length];
+  store.set('zoom', zoom);
+  onResize(); updateZoomLabels();
+  toast('🔍 Phóng to ' + Math.round(zoom * 100) + '%');
+}
+
+// ---------- Xoay màn hình điện thoại (ngang ⇄ dọc) ----------
+async function rotateScreen() {
+  const so = screen.orientation;
+  const portrait = so && so.type ? so.type.startsWith('portrait') : innerHeight > innerWidth;
+  const want = portrait ? 'landscape' : 'portrait';
+  try {
+    // Android: chỉ khoá xoay được khi đang toàn màn hình
+    if (!(document.fullscreenElement || document.webkitFullscreenElement) && reqFS) await reqFS.call(docEl);
+    await so.lock(want);
+    toast(want === 'landscape' ? '🔄 Đã xoay ngang' : '🔄 Đã xoay dọc');
+  } catch (e) {
+    // iPhone / trình duyệt không cho khoá: hướng dẫn xoay tay
+    toast('Tắt "Khoá xoay màn hình" rồi xoay điện thoại ' + (want === 'landscape' ? 'ngang' : 'dọc'));
+  }
+}
+
 // ---------- Tay cầm (gamepad) cho PC / laptop ----------
 const gpPrev = {};
 function pollGamepad() {
@@ -1207,6 +1243,9 @@ document.addEventListener('dblclick', e => e.preventDefault());
 $('ctl').addEventListener('pointerdown', e => e.stopPropagation());
 $('bPause').onclick = () => { if (mode === 'play') pause(); else resume(); };
 $('bFull').onclick = toggleFullscreen;
+$('bZoom').onclick = $('bZoom2').onclick = cycleZoom;
+$('bRot').onclick = $('bRot2').onclick = rotateScreen;
+updateZoomLabels();
 $('bResume').onclick = resume;
 $('bQuit').onclick = showMenu;
 
