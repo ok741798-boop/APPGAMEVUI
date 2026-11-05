@@ -162,6 +162,9 @@ body:not(.touch) #pad { display: none; }
   backdrop-filter: blur(3px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, .4);
 }
+/* Vùng chạm rộng hơn hình tròn một chút: chạm hơi lệch vẫn ăn */
+#pad button { position: relative; }
+#pad button::after { content: ''; position: absolute; inset: calc(var(--b) * -.08); border-radius: 50%; }
 #pad button.jump {
   width: calc(var(--b) * 1.28); height: calc(var(--b) * 1.28); font-size: calc(var(--b) * .5);
   border-color: rgba(94, 240, 255, .7); box-shadow: 0 0 16px rgba(94, 240, 255, .35);

@@ -14,7 +14,7 @@ const JUMP = 760, AIR = 640;     // lực nhảy / nhảy đôi
 const HALF = 11;                 // nửa cạnh nhân vật
 const RUN = 165;                 // tốc độ chạy ngang tự động
 const MOVE = 230;                // tốc độ đi trái/phải bằng nút
-const input = { left: false, right: false, down: false };
+const input = { left: false, right: false, down: false, gpLeft: false, gpRight: false, gpDown: false };
 // Gộp bàn phím + nút cảm ứng + tay cầm (gamepad)
 const inputDir = () => (input.right || input.gpRight ? 1 : 0) - (input.left || input.gpLeft ? 1 : 0);
 const downHeld = () => input.down || input.gpDown;
@@ -176,7 +176,7 @@ let combo, comboT, run, frames, ghostRec, ghostT, bestGhost, deathT, deathReason
 let waveT, climbT, climbH, climbRate;
 
 function reset() {
-  pl = { x: W / 2, y: GROUND - HALF, vx: 0, vy: 0, dir: 1, aim: 0, trail: [], gvx: 0, dashT: 0, dashDir: 1, dashCD: 0, inv: 0, onGround: true, coyote: 0, jumps: 0, sq: 1, alive: true, plat: null };
+  pl = { x: W / 2, y: GROUND - HALF, vx: 0, vy: 0, dir: 1, aim: 0, trail: [], gvx: 0, tilt: 0, dashT: 0, dashDir: 1, dashCD: 0, inv: 0, onGround: true, coyote: 0, jumps: 0, sq: 1, alive: true, plat: null };
   lastCx = W / 2;
   waveT = rand(16, 20); climbT = 0; climbH = 0; climbRate = 0;
   plats = [{ x: 0, y: GROUND, w: W, vx: 0, ground: true }];
@@ -350,8 +350,10 @@ function perfectDodge(o) {
   sfx(1100, .16, 'triangle', .07, 300);
 }
 
+// Vùng va chạm nhỏ hơn hình vẽ 3px (bo tròn góc): sượt qua mép không bị tính trúng → dễ luồn lách
+const HURT = HALF - 3;
 function boxDist(cx, cy) {
-  const dx = Math.max(Math.abs(cx - pl.x) - HALF, 0), dy = Math.max(Math.abs(cy - pl.y) - HALF, 0);
+  const dx = Math.max(Math.abs(cx - pl.x) - HURT, 0), dy = Math.max(Math.abs(cy - pl.y) - HURT, 0);
   return Math.hypot(dx, dy);
 }
 
@@ -437,8 +439,11 @@ function update(dt) {
         pl.y = p.y - HALF; pl.vy = 0; pl.onGround = true; pl.jumps = 0; pl.plat = p;
         if (!was) {
           // Đáp xuống: giữ đà nếu đang giữ nút cùng hướng, không thì đứng lại
-          pl.gvx = dirIn && Math.sign(pl.vx) === dirIn ? clamp(pl.vx, -MOVE, MOVE) : 0;
-          if (fallV > 400) { pl.sq = .7; burst(pl.x, p.y, '#8f88d6', 5, 90); }
+          // Đáp xuống giữ một phần đà rồi trượt nhẹ dừng lại, không khựng đột ngột
+          pl.gvx = dirIn && Math.sign(pl.vx) === dirIn ? clamp(pl.vx, -MOVE, MOVE) : clamp(pl.vx * .45, -110, 110);
+          // Độ nén khi đáp tỉ lệ với tốc độ rơi: rơi nhẹ nén nhẹ, rơi mạnh nén mạnh
+          pl.sq = 1 - Math.min(.3, fallV / 2600);
+          if (fallV > 400) burst(pl.x, p.y, '#8f88d6', 5, 90);
         }
         break;
       }
@@ -461,6 +466,9 @@ function update(dt) {
     while (ghostT >= .1) { ghostT -= .1; ghostRec.push([Math.round(pl.x), Math.round(pl.y)]); }
   }
   pl.sq += (1 - pl.sq) * Math.min(1, dt * 12);
+  // Nghiêng người theo hướng di chuyển (mượt dần), tạo cảm giác chuyển động tự nhiên
+  const moveVx = pl.onGround ? pl.gvx : pl.vx;
+  pl.tilt += (clamp(moveVx * .0007, -.22, .22) - pl.tilt) * Math.min(1, dt * 10);
 
   // Kẻ săn đuổi: dung nham dâng lên, luôn bám sát đáy màn hình
   const lavaSpeed = t < 2 ? 0 : 32 + Math.min(75, (t - 2) * .9);
@@ -551,7 +559,7 @@ function ghostPos() {
 function snap() {
   return {
     cam, lava, shake, t,
-    p: pl.alive ? [pl.x, pl.y, pl.dir, pl.sq, pl.onGround ? 1 : 0, pl.inv > 0 ? 1 : 0, pl.dashCD / DASH_CD] : null,
+    p: pl.alive ? [pl.x, pl.y, pl.dir, pl.sq, pl.onGround ? 1 : 0, pl.inv > 0 ? 1 : 0, pl.dashCD / DASH_CD, pl.tilt] : null,
     aim: pl.alive && pl.onGround ? [pl.x, pl.y, pl.aim] : null,
     trail: pl.alive && (!pl.onGround || pl.dashT > 0) ? pl.trail.slice() : [],
     g: ghostPos(),
@@ -576,8 +584,8 @@ function rr(x, y, w, h, r) {
 
 let rT = 0;   // thời gian của khung hình đang vẽ (cho hoạt ảnh)
 
-function drawBody(x, y, dir, sq, alpha, col, air) {
-  ctx.save(); ctx.globalAlpha = alpha; ctx.translate(x, y + HALF); ctx.scale(1 / sq, sq);
+function drawBody(x, y, dir, sq, alpha, col, air, tilt = 0) {
+  ctx.save(); ctx.globalAlpha = alpha; ctx.translate(x, y + HALF); ctx.rotate(tilt); ctx.scale(1 / sq, sq);
   const top = -HALF * 2;
   if (alpha < 1) {   // bóng ma / vệt mờ: chỉ vẽ dáng
     ctx.fillStyle = col; rr(-HALF, top, HALF * 2, HALF * 2, 8); ctx.fill(); ctx.restore(); return;
@@ -873,12 +881,12 @@ function render(s, opt = {}) {
 
   (s.trail || []).forEach(([tx, ty], i, a) => drawBody(tx, ty, 1, 1, .05 + i / a.length * .15, '#5ef0ff'));
   if (s.p) {
-    const [px, py, pd, psq, ground, inv, cd] = s.p;
+    const [px, py, pd, psq, ground, inv, cd, tilt] = s.p;
     if (inv) {   // vòng khiên khi đang lướt né
       ctx.save(); ctx.strokeStyle = '#bff9ff'; ctx.lineWidth = 2; ctx.shadowColor = '#5ef0ff'; ctx.shadowBlur = 14;
       ctx.globalAlpha = .7; ctx.beginPath(); ctx.arc(px, py, HALF + 8, 0, 7); ctx.stroke(); ctx.restore();
     }
-    drawBody(px, py, pd, psq, 1, inv ? '#e6feff' : '#5ef0ff', !ground);
+    drawBody(px, py, pd, psq, 1, inv ? '#e6feff' : '#5ef0ff', !ground, tilt || 0);
     if (cd > 0) {   // thanh hồi chiêu lướt né
       ctx.fillStyle = 'rgba(0,0,0,.45)'; rr(px - 14, py + HALF + 5, 28, 4, 2); ctx.fill();
       ctx.fillStyle = '#5ef0ff'; rr(px - 14, py + HALF + 5, 28 * (1 - cd), 4, 2); ctx.fill();
@@ -1257,24 +1265,47 @@ updateZoomLabels();
 $('bResume').onclick = resume;
 $('bQuit').onclick = showMenu;
 
-// Nút cảm ứng: ◀ ▶ ▼ giữ để di chuyển, ▲ để nhảy
-document.querySelectorAll('#pad button').forEach(b => {
+// Nút cảm ứng kiểu tay cầm: ▲ nhảy, ⚡ lướt, giữ ◀ ▶ ▼ để di chuyển.
+// Mỗi ngón tay được theo dõi riêng; trượt ngón giữa ◀ ▶ ▼ là đổi nút ngay, không cần nhấc tay.
+const pad = $('pad');
+const HOLDABLE = ['left', 'right', 'down'];
+const touches = new Map();   // pointerId → nút đang giữ
+function setHold(b, on) {
+  // Nhả nút chỉ khi không còn ngón nào khác đang giữ nó
+  if (!on && [...touches.values()].includes(b)) return;
+  b.classList.toggle('on', on);
   const k = b.dataset.k;
-  const press = on => e => {
-    e.preventDefault(); e.stopPropagation();
-    if (on) initAudio();
-    if (k === 'up') { if (on && mode === 'play') jump(); }
-    else if (k === 'dash') { if (on) dash(inputDir() || pl.dir); }
-    else {
-      if (on && k === 'down' && pl) pl.dropBuf = BUFFER;   // chạm nhanh ▼ cũng rơi xuyên bục
-      input[k] = on;
-    }
-    b.classList.toggle('on', on);
-  };
-  b.addEventListener('pointerdown', press(true));
-  ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => b.addEventListener(ev, press(false)));
-  b.addEventListener('contextmenu', e => e.preventDefault());
+  if (!HOLDABLE.includes(k)) return;
+  if (on && k === 'down' && pl) pl.dropBuf = BUFFER;   // chạm nhanh ▼ cũng rơi xuyên bục
+  input[k] = on;
+}
+pad.addEventListener('pointerdown', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  e.preventDefault(); e.stopPropagation();
+  initAudio();
+  touches.set(e.pointerId, b); setHold(b, true);
+  const k = b.dataset.k;
+  if (k === 'up') { if (mode === 'play') jump(); }
+  else if (k === 'dash') dash(inputDir() || pl.dir);
 });
+addEventListener('pointermove', e => {
+  const cur = touches.get(e.pointerId);
+  if (!cur || !HOLDABLE.includes(cur.dataset.k)) return;
+  const el = document.elementFromPoint(e.clientX, e.clientY);
+  const b = el && el.closest ? el.closest('#pad button') : null;
+  if (b && b !== cur && HOLDABLE.includes(b.dataset.k)) {
+    touches.set(e.pointerId, b); setHold(cur, false); setHold(b, true);
+  }
+});
+const releaseTouch = e => {
+  const b = touches.get(e.pointerId);
+  if (!b) return;
+  touches.delete(e.pointerId); setHold(b, false);
+};
+addEventListener('pointerup', releaseTouch);
+addEventListener('pointercancel', releaseTouch);
+pad.addEventListener('contextmenu', e => e.preventDefault());
 $('bStart').onclick = start;
 $('bAgain').onclick = start;
 $('bMenu').onclick = showMenu;
@@ -1286,12 +1317,15 @@ $('bShare').onclick = async () => shareOrDownload(await makeCard(), 'ne-di-' + l
 // Vật lý chạy bước cố định 1/120s để chuyển động đều trên mọi máy
 const STEP = 1 / 120;
 let last = performance.now(), acc = 0;
-let ftAvg = 16, slowFor = 0;
+let ftAvg = 16, slowFor = 0, nextDraw = 0;
 function loop(now) {
   // Giới hạn 60 khung hình/giây: màn 120/144Hz không vẽ thừa → đỡ tốn pin, đỡ nóng máy
-  if (now - last < 1000 / 62) { requestAnimationFrame(loop); return; }
+  // (lịch vẽ theo mốc thời gian để màn 144Hz vẫn đạt ~60fps đều, không tụt xuống 48fps)
+  if (now < nextDraw - 3) { requestAnimationFrame(loop); return; }
+  nextDraw = Math.max(nextDraw + 1000 / 60, now);
   const ms = Math.min(100, now - last);
-  const raw = Math.min(.033, ms / 1000); last = now;
+  // Khung hình ~16.7ms bị nhiễu đồng hồ vài phần ms → làm tròn đúng 1/60s để vật lý chạy đều, không giật
+  const raw = Math.abs(ms - 1000 / 60) < 1.5 ? 1 / 60 : Math.min(.033, ms / 1000); last = now;
   pollGamepad();
   // Máy chạy chậm (< ~42 fps) liên tục 2 giây → hạ một mức chất lượng (cao → vừa → thấp)
   if (mode === 'play' && tier < 2) {
