@@ -17,7 +17,8 @@ const DASH_SPEED = 720, DASH_TIME = .16, DASH_INV = .3, DASH_CD = .8;   // lư�
 const GROUND = H - 60;
 
 const $ = id => document.getElementById(id);
-const cv = $('c'), ctx = cv.getContext('2d'), wrap = $('wrap');
+// desynchronized: giảm độ trễ hiển thị trên trình duyệt hỗ trợ
+const cv = $('c'), ctx = cv.getContext('2d', { alpha: false, desynchronized: true }), wrap = $('wrap');
 const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const approach = (v, target, step) => v < target ? Math.min(v + step, target) : Math.max(v - step, target);
@@ -112,10 +113,12 @@ addEventListener('resize', resize); resize();
 let mode = 'menu';           // menu | play | dying | over | replay
 let pl, plats, objs, shocks, parts, texts, cam, lava, t, topY, spawnT, shake, slowT;
 let combo, comboT, run, frames, ghostRec, ghostT, bestGhost, deathT, deathReason, lastResult, lastCx;
+let waveT, climbT, climbH, climbRate;
 
 function reset() {
   pl = { x: W / 2, y: GROUND - HALF, vx: 0, vy: 0, dir: 1, aim: 0, trail: [], gvx: 0, dashT: 0, dashDir: 1, dashCD: 0, inv: 0, onGround: true, coyote: 0, jumps: 0, sq: 1, alive: true, plat: null };
   lastCx = W / 2;
+  waveT = rand(16, 20); climbT = 0; climbH = 0; climbRate = 0;
   plats = [{ x: 0, y: GROUND, w: W, vx: 0, ground: true }];
   objs = []; shocks = []; parts = []; texts = [];
   cam = 0; lava = H + 120; t = 0; topY = GROUND; spawnT = 1.5; shake = 0; slowT = 0;
@@ -141,19 +144,82 @@ function genPlats() {
   }
 }
 
-function spawnObj() {
+// ---------- Smart Spawning System ----------
+const WARN_TIME = .5;   // vật thể xuất hiện phía trên màn hình trước 0.5s, có mũi tên báo trước
+
+function pickType() {
   const pool = Object.keys(TYPES).filter(k => t >= TYPES[k].from);
-  let r = Math.random() * pool.reduce((s, k) => s + WEIGHT[k], 0), type = pool[0];
-  for (const k of pool) { r -= WEIGHT[k]; if (r <= 0) { type = k; break; } }
-  const aim = Math.random() < .4;
+  let r = Math.random() * pool.reduce((s, k) => s + WEIGHT[k], 0);
+  for (const k of pool) { r -= WEIGHT[k]; if (r <= 0) return k; }
+  return pool[0];
+}
+
+function makeObj(type, x, vy, yOff = 0) {
+  // Giới hạn tốc độ rơi: luôn có ít nhất ~1.1s từ mép trên tới ngang tầm người chơi
+  const reach = Math.max(200, pl.y - cam);
+  vy = Math.min(vy, reach / 1.1);
+  if (type === 'homing') vy *= .72;
+  if (type === 'bomb') vy *= .85;
   const o = {
-    type, x: aim ? clamp(pl.x + rand(-60, 60), 20, W - 20) : rand(20, W - 20), y: cam - 30,
-    r: type === 'rock' ? rand(12, 20) : 16, vx: 0, vy: rand(150, 200) + Math.min(150, t * 2),
+    type, x, y: cam - 30 - vy * WARN_TIME - yOff, r: type === 'rock' ? rand(12, 20) : 16, vx: 0, vy,
     t: 0, vis: true, passed: false, minD: 1e9, dead: false,
   };
-  if (type === 'homing') o.vy *= .72;
-  if (type === 'bomb') o.vy *= .85;
   objs.push(o);
+  return o;
+}
+
+// Kiểm tra vị trí công bằng: không xếp vật thể sát nhau thành bức tường không lối thoát
+function fairX(x, r, spawnY) {
+  for (const o of objs) {
+    if (Math.abs(o.y - spawnY) < 150 && Math.abs(o.x - x) < r + o.r + 55) return false;
+  }
+  return true;
+}
+
+function spawnObj() {
+  const type = pickType();
+  const baseVy = rand(150, 200) + Math.min(150, t * 2);
+  const spawnY = cam - 30 - baseVy * WARN_TIME;
+  // Chỉ tối đa 1 vật thể "nhắm" vào người chơi cùng lúc
+  const aimed = objs.some(o => o.aimed && !o.passed);
+  let x = null;
+  if (!aimed && Math.random() < .4) {
+    // Dự đoán vị trí người chơi theo vận tốc (chỉ một phần, để vẫn né được)
+    const lead = clamp((pl.y - spawnY) / baseVy, 0, 2.5);
+    const vxNow = pl.onGround ? pl.gvx : pl.vx;
+    x = clamp(pl.x + vxNow * lead * .5 + rand(-40, 40), 20, W - 20);
+    if (!fairX(x, 18, spawnY)) x = null;
+  }
+  if (x === null) {
+    for (let i = 0; i < 6 && x === null; i++) { const c = rand(20, W - 20); if (fairX(c, 18, spawnY)) x = c; }
+  }
+  if (x === null) return false;   // không có chỗ công bằng: bỏ lượt này
+  const o = makeObj(type, x, baseVy);
+  o.aimed = !aimed && Math.abs(x - pl.x) < 60;
+  return true;
+}
+
+// Đợt tấn công theo nhịp: hàng rào có 1 khe hở, hoặc mưa chéo
+function spawnWave() {
+  const vy = 170 + Math.min(80, t);
+  if (Math.random() < .5) {
+    const gx = rand(70, W - 70);
+    for (let x = 28; x < W - 10; x += 62) if (Math.abs(x - gx) > 62) makeObj('rock', x, vy).r = 15;
+    floatText(W / 2, cam + 170, '⚠ HÀNG RÀO! Tìm khe hở', '#ff9a2e', 18);
+  } else {
+    const rev = Math.random() < .5;
+    for (let i = 0; i < 6; i++) makeObj('rock', rev ? W - 35 - i * 70 : 35 + i * 70, vy, i * 55).r = 14;
+    floatText(W / 2, cam + 170, '⚠ MƯA CHÉO!', '#ff9a2e', 18);
+  }
+  sfx(300, .25, 'triangle', .05, 200);
+}
+
+// Độ khó theo thời gian thực: leo nhanh → nhiều vật hơn; sát dung nham → bớt để có nhịp thở
+function spawnInterval() {
+  const base = Math.max(.32, 1.05 - t * .01);
+  const climb = clamp(climbRate / 8, 0, 1);
+  const danger = clamp(1 - (lava - pl.y) / 300, 0, 1);
+  return base * (1 - climb * .25) * (1 + danger * .7) * rand(.75, 1.25);
 }
 
 // ---------- Hiệu ứng ----------
@@ -184,21 +250,27 @@ function aimVx() {
   return best === null ? pl.dir * RUN : clamp(best, -320, 320);
 }
 
+const BUFFER = .15;   // bấm sớm một chút vẫn được tính (input buffer)
+const buzz = ms => { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {} };
+
 function jump() {
   if (!pl.alive) return;
   if (pl.onGround || pl.coyote > 0) {
     pl.vx = inputDir() ? inputDir() * MOVE : aimVx(); if (Math.abs(pl.vx) > 5) pl.dir = Math.sign(pl.vx);
-    pl.vy = -JUMP; pl.jumps = 1; pl.onGround = false; pl.coyote = 0; pl.sq = 1.35;
-    sfx(420, .09, 'square', .045, 300); burst(pl.x, pl.y + HALF, '#cfeaff', 6, 120);
+    pl.vy = -JUMP; pl.jumps = 1; pl.onGround = false; pl.coyote = 0; pl.sq = 1.35; pl.jumpBuf = 0;
+    sfx(420, .09, 'square', .045, 300); burst(pl.x, pl.y + HALF, '#cfeaff', 6, 120); buzz(8);
   } else if (pl.jumps < 2) {
-    pl.vy = -AIR; pl.jumps = 2; pl.sq = 1.3;
-    sfx(640, .1, 'square', .045, 420); burst(pl.x, pl.y + HALF, '#5ef0ff', 12, 160);
-  }
+    pl.vy = -AIR; pl.jumps = 2; pl.sq = 1.3; pl.jumpBuf = 0;
+    if (inputDir()) pl.vx = inputDir() * MOVE;   // nhảy đôi đổi hướng ngay theo nút đang giữ
+    sfx(640, .1, 'square', .045, 420); burst(pl.x, pl.y + HALF, '#5ef0ff', 12, 160); buzz(8);
+  } else pl.jumpBuf = BUFFER;   // hết lượt nhảy: nhớ lệnh, chạm bục là nhảy luôn
 }
 
 // Lướt né: bấm ⚡ để lướt nhanh theo hướng đang giữ/đang nhìn, miễn nhiễm va chạm trong chốc lát
 function dash(dir) {
-  if (mode !== 'play' || !pl.alive || pl.dashCD > 0) return;
+  if (mode !== 'play' || !pl.alive) return;
+  if (pl.dashCD > 0) { if (pl.dashCD < BUFFER) { pl.dashBuf = BUFFER; pl.dashBufDir = dir; } return; }
+  buzz(12); pl.dashBuf = 0;
   pl.dashT = DASH_TIME; pl.dashDir = dir; pl.inv = DASH_INV; pl.dashCD = DASH_CD; pl.dir = dir;
   if (pl.onGround) pl.gvx = dir * MOVE;
   burst(pl.x - dir * 10, pl.y, '#bff9ff', 10, 140);
@@ -260,6 +332,9 @@ function update(dt) {
     run.time = t;
     pl.vy = Math.min(pl.vy + G * dt, 1100);
     pl.dashCD = Math.max(0, pl.dashCD - dt); pl.inv = Math.max(0, pl.inv - dt);
+    pl.jumpBuf = Math.max(0, (pl.jumpBuf || 0) - dt);
+    pl.dropBuf = Math.max(0, (pl.dropBuf || 0) - dt);
+    if (pl.dashBuf > 0) { pl.dashBuf -= dt; if (pl.dashCD <= 0) dash(inputDir() || pl.dashBufDir); }
     if (pl.dashT > 0) {
       pl.dashT -= dt;
       pl.x = clamp(pl.x + pl.dashDir * DASH_SPEED * dt, HALF, W - HALF);
@@ -277,7 +352,9 @@ function update(dt) {
       }
       if (dirIn) pl.dir = dirIn;
       // Nút xuống: rơi xuyên qua bục (trừ mặt đất)
-      if (input.down && !pl.plat.ground) { pl.dropPlat = pl.plat; pl.dropT = .25; pl.onGround = false; pl.vy = 120; }
+      if ((input.down || pl.dropBuf > 0) && !pl.plat.ground) {
+        pl.dropPlat = pl.plat; pl.dropT = .25; pl.onGround = false; pl.vy = 160; pl.dropBuf = 0; pl.coyote = 0;
+      }
     } else {
       if (dirIn) pl.vx = approach(pl.vx, dirIn * MOVE, 900 * dt);
       if (input.down) pl.vy = Math.max(pl.vy, 750);   // lao xuống nhanh
@@ -292,7 +369,8 @@ function update(dt) {
     pl.onGround = false;
     if (pl.vy >= 0) for (const p of plats) {
       if (pl.dropT > 0 && p === pl.dropPlat) continue;
-      if (pl.x + HALF > p.x && pl.x - HALF < p.x + p.w && prevBottom <= p.y + 1 && pl.y + HALF >= p.y) {
+      // Nới 4px ở mép bục để đáp sát mép vẫn đứng được
+      if (pl.x + HALF + 4 > p.x && pl.x - HALF - 4 < p.x + p.w && prevBottom <= p.y + 1 && pl.y + HALF >= p.y) {
         pl.y = p.y - HALF; pl.vy = 0; pl.onGround = true; pl.jumps = 0; pl.plat = p;
         if (!was) {
           // Đáp xuống: giữ đà nếu đang giữ nút cùng hướng, không thì đứng lại
@@ -309,6 +387,7 @@ function update(dt) {
       if (!dirIn && !pl.gvx && Math.abs(pl.aim) > 5) pl.dir = Math.sign(pl.aim);
     }
     pl.coyote = pl.onGround ? .1 : Math.max(0, pl.coyote - dt);
+    if (pl.onGround && pl.jumpBuf > 0) jump();
     pl.trail.push([pl.x, pl.y]); if (pl.trail.length > 12) pl.trail.shift();
     run.maxH = Math.max(run.maxH, (GROUND - HALF - pl.y) / 10);
 
@@ -331,8 +410,13 @@ function update(dt) {
 
   // Sinh vật thể
   if (pl.alive) {
+    // Đo tốc độ leo (m/s) mỗi giây
+    climbT += dt;
+    if (climbT >= 1) { climbRate = climbRate * .5 + (run.maxH - climbH) * .5; climbH = run.maxH; climbT = 0; }
+    waveT -= dt;
+    if (t > 15 && waveT <= 0) { spawnWave(); waveT = rand(10, 14); spawnT = 1.4; }
     spawnT -= dt;
-    if (spawnT <= 0) { spawnObj(); spawnT = Math.max(.3, 1.05 - t * .01) * rand(.7, 1.3); }
+    if (spawnT <= 0) spawnT = spawnObj() ? spawnInterval() : .15;
   }
 
   // Vật thể sống
@@ -353,7 +437,7 @@ function update(dt) {
     const py = o.y;
     o.x += o.vx * dt; o.y += o.vy * dt;
     if (o.type === 'shard' && (o.x < o.r || o.x > W - o.r)) { o.vx *= -1; o.x = clamp(o.x, o.r, W - o.r); }
-    if (o.type === 'bomb') {
+    if (o.type === 'bomb' && o.y > cam) {
       for (const p of plats) {
         if (o.x > p.x - 4 && o.x < p.x + p.w + 4 && py + o.r <= p.y && o.y + o.r >= p.y) { o.y = p.y - o.r; explode(o); break; }
       }
@@ -703,6 +787,17 @@ function render(s, opt = {}) {
 
   for (const o of s.objs) drawObj(o, s);
 
+  // Mũi tên cảnh báo vật thể sắp rơi vào màn hình
+  for (const [type, x, y, r] of s.objs) {
+    const d = s.cam - (y + r);
+    if (d <= 0 || d > 160) continue;
+    const col = type === 'shard' ? TYPES.split.color : TYPES[type].color;
+    const k = 1 - d / 160, wy = s.cam + 6 + Math.sin(s.t * 14) * 1.5;
+    ctx.globalAlpha = .35 + k * .6; ctx.fillStyle = col;
+    ctx.beginPath(); ctx.moveTo(x - 7, wy); ctx.lineTo(x + 7, wy); ctx.lineTo(x, wy + 9 + k * 3); ctx.closePath(); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
   for (const [x, y, r, a] of s.shocks) {
     ctx.globalAlpha = Math.max(0, a);
     ctx.fillStyle = 'rgba(255,154,46,.25)'; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
@@ -944,11 +1039,12 @@ wrap.addEventListener('pointerdown', e => {
   initAudio();
   if (mode === 'play') { jump(); e.preventDefault(); }
   else if (mode === 'replay' && !rp.record) rp.rt = rp.end;
-});
+}, { passive: false });
 const HOLD_KEYS = { ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right', ArrowDown: 'down', KeyS: 'down' };
 addEventListener('keydown', e => {
   if (HOLD_KEYS[e.code]) {
     e.preventDefault();
+    if (HOLD_KEYS[e.code] === 'down' && !e.repeat && pl) pl.dropBuf = BUFFER;
     input[HOLD_KEYS[e.code]] = true; return;
   }
   if (['ShiftLeft', 'ShiftRight', 'KeyK', 'KeyJ'].includes(e.code)) {
@@ -971,7 +1067,10 @@ document.querySelectorAll('#pad button').forEach(b => {
     if (on) initAudio();
     if (k === 'up') { if (on && mode === 'play') jump(); }
     else if (k === 'dash') { if (on) dash(inputDir() || pl.dir); }
-    else input[k] = on;
+    else {
+      if (on && k === 'down' && pl) pl.dropBuf = BUFFER;   // chạm nhanh ▼ cũng rơi xuyên bục
+      input[k] = on;
+    }
     b.classList.toggle('on', on);
   };
   b.addEventListener('pointerdown', press(true));
