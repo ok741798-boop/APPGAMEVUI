@@ -5,16 +5,21 @@
    ========================================================= */
 
 // ---------- Hằng số ----------
-const W = 420, H = 760;          // độ phân giải logic
+// Khung chơi tự co giãn theo màn hình: cao tối thiểu 760, rộng 380..900 đơn vị logic
+const BASE_W = 420, BASE_H = 760, MIN_W = 380, MAX_W = 900;
+let W = BASE_W, H = BASE_H;      // kích thước khung chơi hiện tại (đơn vị logic)
+let offX = 0;                    // lề trái khi màn hình rộng hơn MAX_W
 const G = 2000;                  // trọng lực
 const JUMP = 760, AIR = 640;     // lực nhảy / nhảy đôi
 const HALF = 11;                 // nửa cạnh nhân vật
 const RUN = 165;                 // tốc độ chạy ngang tự động
 const MOVE = 230;                // tốc độ đi trái/phải bằng nút
 const input = { left: false, right: false, down: false };
-const inputDir = () => (input.right ? 1 : 0) - (input.left ? 1 : 0);
+// Gộp bàn phím + nút cảm ứng + tay cầm (gamepad)
+const inputDir = () => (input.right || input.gpRight ? 1 : 0) - (input.left || input.gpLeft ? 1 : 0);
+const downHeld = () => input.down || input.gpDown;
 const DASH_SPEED = 720, DASH_TIME = .16, DASH_INV = .3, DASH_CD = .8;   // lướt né
-const GROUND = H - 60;
+const GROUND = BASE_H - 60;
 
 const $ = id => document.getElementById(id);
 // desynchronized: giảm độ trễ hiển thị trên trình duyệt hỗ trợ
@@ -99,15 +104,57 @@ function sfx(f, d = .1, type = 'square', v = .05, slide = 0) {
   o.connect(g).connect(ac.destination); o.start(now); o.stop(now + d);
 }
 
-// ---------- Kích thước màn hình ----------
+// ---------- Kích thước màn hình (điện thoại / laptop / PC) ----------
 let scale = 1;
+let lowFx = false;   // chế độ mượt cho máy yếu: tắt hiệu ứng phát sáng, giảm độ phân giải
+
+// Khi bật lowFx, mọi lệnh shadowBlur bị bỏ qua (hiệu ứng glow tốn GPU nhất trên điện thoại yếu)
+const SB = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, 'shadowBlur');
+if (SB && SB.set) Object.defineProperty(ctx, 'shadowBlur', {
+  get() { return SB.get.call(ctx); },
+  set(v) { SB.set.call(ctx, lowFx ? 0 : v); },
+});
+
 function resize() {
-  const s = Math.min(innerWidth / W, innerHeight / H), dpr = Math.min(window.devicePixelRatio || 1, 2);
-  wrap.style.width = W * s + 'px'; wrap.style.height = H * s + 'px';
-  cv.width = Math.round(W * s * dpr); cv.height = Math.round(H * s * dpr);
-  scale = cv.width / W;
+  // visualViewport: kích thước thật trên điện thoại (trừ thanh địa chỉ / bàn phím ảo)
+  const vv = window.visualViewport;
+  const vw = vv ? vv.width : innerWidth, vh = vv ? vv.height : innerHeight;
+  // Canvas phủ kín màn hình. Khung chơi cao >= 760, rộng 380..900 đơn vị logic:
+  //  điện thoại dài → thấy nhiều trời hơn; iPad/laptop → khung rộng ra; màn quá rộng → 2 bên trang trí
+  const ui = Math.min(vh / BASE_H, vw / MIN_W);   // số pixel CSS cho mỗi đơn vị logic
+  const viewW = vw / ui;
+  W = Math.round(Math.min(viewW, MAX_W)); H = Math.round(vh / ui);
+  offX = (viewW - W) / 2;
+  const dpr = lowFx ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+  cv.style.width = vw + 'px'; cv.style.height = vh + 'px';
+  cv.width = Math.round(vw * dpr); cv.height = Math.round(vh * dpr);
+  scale = ui * dpr;
+  // Biến CSS cho giao diện: --q co theo màn hình (menu, chữ), --u/--offx để đặt nút theo khung chơi
+  const r = document.documentElement.style;
+  // Màn ngang: menu chia 2 cột nên được to hơn; màn dọc: giới hạn theo chiều cao để menu không bị tràn
+  const landscape = vw >= vh;
+  r.setProperty('--q', Math.min(vw / (landscape ? 840 : BASE_W), vh / (landscape ? 640 : 960)) * 4.2 + 'px');
+  r.setProperty('--u', ui + 'px');
+  r.setProperty('--offx', offX * ui + 'px');
 }
-addEventListener('resize', resize); resize();
+function onResize() {
+  resize();
+  if (pl) pl.x = clamp(pl.x, HALF, W - HALF);
+  // Đổi kích thước làm xoá canvas: vẽ lại khung hình cuối khi đang dừng / game over
+  if ((mode === 'over' || mode === 'pause') && frames.length) render(frames[frames.length - 1].s);
+}
+addEventListener('resize', onResize);
+if (window.visualViewport) visualViewport.addEventListener('resize', onResize);
+addEventListener('orientationchange', () => setTimeout(onResize, 250));
+resize();
+
+// Nhận diện thiết bị cảm ứng để hiện nút bấm, còn máy tính thì hiện hướng dẫn phím
+const setTouch = on => document.body.classList.toggle('touch', on);
+setTouch(matchMedia('(pointer: coarse)').matches || (navigator.maxTouchPoints > 0 && !matchMedia('(pointer: fine)').matches));
+addEventListener('pointerdown', e => {
+  if (e.pointerType === 'touch' || e.pointerType === 'pen') setTouch(true);
+  else if (e.pointerType === 'mouse') setTouch(false);
+}, true);
 
 // ---------- Trạng thái game ----------
 let mode = 'menu';           // menu | play | dying | over | replay
@@ -121,7 +168,7 @@ function reset() {
   waveT = rand(16, 20); climbT = 0; climbH = 0; climbRate = 0;
   plats = [{ x: 0, y: GROUND, w: W, vx: 0, ground: true }];
   objs = []; shocks = []; parts = []; texts = [];
-  cam = 0; lava = H + 120; t = 0; topY = GROUND; spawnT = 1.5; shake = 0; slowT = 0;
+  cam = GROUND + 60 - H; lava = cam + H + 120; t = 0; topY = GROUND; spawnT = 1.5; shake = 0; slowT = 0;
   combo = 0; comboT = 0;
   run = { dodges: 0, nears: 0, maxCombo: 0, bonus: 0, maxH: 0, time: 0 };
   frames = []; ghostRec = [[pl.x, pl.y]]; ghostT = 0;
@@ -208,7 +255,8 @@ function spawnWave() {
     floatText(W / 2, cam + 170, '⚠ HÀNG RÀO! Tìm khe hở', '#ff9a2e', 18);
   } else {
     const rev = Math.random() < .5;
-    for (let i = 0; i < 6; i++) makeObj('rock', rev ? W - 35 - i * 70 : 35 + i * 70, vy, i * 55).r = 14;
+    const n = Math.round(W / 70), stepX = (W - 70) / (n - 1);
+    for (let i = 0; i < n; i++) makeObj('rock', rev ? W - 35 - i * stepX : 35 + i * stepX, vy, i * 55).r = 14;
     floatText(W / 2, cam + 170, '⚠ MƯA CHÉO!', '#ff9a2e', 18);
   }
   sfx(300, .25, 'triangle', .05, 200);
@@ -216,7 +264,8 @@ function spawnWave() {
 
 // Độ khó theo thời gian thực: leo nhanh → nhiều vật hơn; sát dung nham → bớt để có nhịp thở
 function spawnInterval() {
-  const base = Math.max(.32, 1.05 - t * .01);
+  // Khung rộng hơn thì rơi dày hơn, giữ mật độ vật thể như nhau trên mọi thiết bị
+  const base = Math.max(.32, 1.05 - t * .01) * (BASE_W / W);
   const climb = clamp(climbRate / 8, 0, 1);
   const danger = clamp(1 - (lava - pl.y) / 300, 0, 1);
   return base * (1 - climb * .25) * (1 + danger * .7) * rand(.75, 1.25);
@@ -352,12 +401,12 @@ function update(dt) {
       }
       if (dirIn) pl.dir = dirIn;
       // Nút xuống: rơi xuyên qua bục (trừ mặt đất)
-      if ((input.down || pl.dropBuf > 0) && !pl.plat.ground) {
+      if ((downHeld() || pl.dropBuf > 0) && !pl.plat.ground) {
         pl.dropPlat = pl.plat; pl.dropT = .25; pl.onGround = false; pl.vy = 160; pl.dropBuf = 0; pl.coyote = 0;
       }
     } else {
       if (dirIn) pl.vx = approach(pl.vx, dirIn * MOVE, 900 * dt);
-      if (input.down) pl.vy = Math.max(pl.vy, 750);   // lao xuống nhanh
+      if (downHeld()) pl.vy = Math.max(pl.vy, 750);   // lao xuống nhanh
       pl.x += pl.vx * dt;
       if (pl.x < HALF) { pl.x = HALF; pl.vx = Math.abs(pl.vx); }
       else if (pl.x > W - HALF) { pl.x = W - HALF; pl.vx = -Math.abs(pl.vx); }
@@ -501,7 +550,7 @@ function snap() {
 }
 
 // ---------- Vẽ ----------
-const STARS = Array.from({ length: 90 }, () => [Math.random() * W, Math.random() * H, rand(.2, 1)]);
+const STARS = Array.from({ length: 140 }, () => [Math.random(), Math.random(), rand(.2, 1)]);   // toạ độ 0..1, nhân với W/H khi vẽ
 const mix = (a, b, k) => `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * k)).join(',')})`;
 
 function rr(x, y, w, h, r) {
@@ -717,7 +766,9 @@ function drawObj(o, s) {
 }
 
 function render(s, opt = {}) {
-  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  drawSides();
+  ctx.setTransform(scale, 0, 0, scale, offX * scale, 0);
+  ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();   // chỉ vẽ trong khung chơi
   rT = s.t;
   const k = Math.min(1, s.hud.maxH / 600);
   const bg = ctx.createLinearGradient(0, 0, 0, H);
@@ -726,15 +777,15 @@ function render(s, opt = {}) {
   ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
 
   for (const [sx, sy, d] of STARS) {
-    const yy = ((sy - s.cam * d * .15) % H + H) % H;
-    ctx.globalAlpha = (.25 + k * .6) * d; ctx.fillStyle = '#fff'; ctx.fillRect(sx, yy, d * 2, d * 2);
+    const yy = ((sy * H - s.cam * d * .15) % H + H) % H;
+    ctx.globalAlpha = (.25 + k * .6) * d; ctx.fillStyle = '#fff'; ctx.fillRect(sx * W, yy, d * 2, d * 2);
   }
   ctx.globalAlpha = 1;
 
   // Tinh vân + đồi núi phía xa (trôi chậm khi leo lên)
-  for (const [nx, ny, nr, nc] of [[90, 180, 220, '120,60,255'], [340, 460, 260, '255,60,150']]) {
+  for (const [nx, ny, nr, nc] of [[.21, 180, 220, '120,60,255'], [.8, 460, 260, '255,60,150']]) {
     const yy = ((ny - s.cam * .08) % (H + 400) + H + 400) % (H + 400) - 200;
-    const ng = ctx.createRadialGradient(nx, yy, 0, nx, yy, nr);
+    const ng = ctx.createRadialGradient(nx * W, yy, 0, nx * W, yy, nr);
     ng.addColorStop(0, `rgba(${nc},.16)`); ng.addColorStop(1, `rgba(${nc},0)`);
     ctx.fillStyle = ng; ctx.fillRect(0, 0, W, H);
   }
@@ -891,11 +942,31 @@ function render(s, opt = {}) {
     ctx.fillStyle = '#ffcf3f'; ctx.font = '900 18px system-ui';
     ctx.fillText('NÉ ĐI!  ·  ' + lastResult.score + ' điểm  ·  Bạn né được không?', W / 2, H - 17);
   }
+  ctx.restore();   // bỏ vùng cắt khung chơi
+}
+
+// Hai bên khung chơi trên màn hình rộng (laptop/PC/iPad ngang): nền tối + viền sáng
+function drawSides() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const g = ctx.createLinearGradient(0, 0, 0, cv.height);
+  g.addColorStop(0, '#120a2a'); g.addColorStop(1, '#2a0f24');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, cv.width, cv.height);
+  if (offX <= 0) return;
+  const x0 = offX * scale, x1 = (offX + W) * scale;
+  ctx.fillStyle = 'rgba(255,255,255,.035)';
+  for (let y = (performance.now() / 40) % 60 * scale; y < cv.height; y += 60 * scale) {
+    ctx.fillRect(x0 - 40 * scale, y, 24 * scale, 2 * scale);
+    ctx.fillRect(x1 + 16 * scale, y, 24 * scale, 2 * scale);
+  }
+  ctx.save(); ctx.shadowColor = '#7a6cff'; ctx.shadowBlur = 18 * scale;
+  ctx.fillStyle = 'rgba(160,150,255,.55)';
+  ctx.fillRect(x0 - 3 * scale, 0, 3 * scale, cv.height); ctx.fillRect(x1, 0, 3 * scale, cv.height);
+  ctx.restore();
 }
 
 // ---------- Kết thúc lượt ----------
 function gameOver() {
-  mode = 'over'; $('pad').classList.add('hidden');
+  mode = 'over'; playUI(false);
   const score = curScore(), before = new Set(unlockedTitles());
   const newBest = score > stats.bestScore;
   stats.runs++; stats.dodges += run.dodges; stats.nears += run.nears;
@@ -929,7 +1000,7 @@ function gameOver() {
 function currentTitle() { const u = unlockedTitles(); return u[u.length - 1] || 'Tân binh'; }
 
 function showMenu() {
-  mode = 'menu'; reset(); $('pad').classList.add('hidden');
+  mode = 'menu'; reset(); playUI(false); $('pause').classList.add('hidden');
   $('over').classList.add('hidden'); $('menu').classList.remove('hidden');
   $('legend').innerHTML = Object.values(TYPES)
     .map(o => `<div><i style="background:${o.color};color:${o.color}"></i><span><b>${o.name}</b>${o.desc}</span></div>`).join('');
@@ -942,8 +1013,65 @@ function showMenu() {
 function start() {
   initAudio(); reset(); mode = 'play';
   input.left = input.right = input.down = false;
-  $('menu').classList.add('hidden'); $('over').classList.add('hidden'); $('pad').classList.remove('hidden');
+  $('menu').classList.add('hidden'); $('over').classList.add('hidden'); playUI(true);
 }
+
+// Hiện/ẩn nút điều khiển + nút góc trong lúc chơi
+function playUI(on) {
+  $('pad').classList.toggle('hidden', !on);
+  $('ctl').classList.toggle('hidden', !on);
+  if (!on) document.querySelectorAll('#pad button').forEach(b => b.classList.remove('on'));
+}
+
+// ---------- Tạm dừng (tự dừng khi chuyển tab / ẩn app / mất focus) ----------
+function pause() {
+  if (mode !== 'play') return;
+  mode = 'pause'; input.left = input.right = input.down = false;
+  document.querySelectorAll('#pad button').forEach(b => b.classList.remove('on'));
+  $('pad').classList.add('hidden'); $('pause').classList.remove('hidden');
+}
+function resume() {
+  if (mode !== 'pause') return;
+  mode = 'play'; last = performance.now(); acc = 0;
+  $('pause').classList.add('hidden'); $('pad').classList.remove('hidden');
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
+
+// ---------- Toàn màn hình ----------
+const docEl = document.documentElement;
+const reqFS = docEl.requestFullscreen || docEl.webkitRequestFullscreen;
+function toggleFullscreen() {
+  const d = document;
+  try {
+    if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+    else { const r = reqFS.call(docEl); if (r && r.catch) r.catch(() => {}); }
+  } catch (e) {}
+}
+if (!reqFS) $('bFull').classList.add('hidden');   // iPhone không hỗ trợ: ẩn nút
+
+// ---------- Tay cầm (gamepad) cho PC / laptop ----------
+const gpPrev = {};
+function pollGamepad() {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  let gp = null;
+  for (const p of pads) if (p && p.connected) { gp = p; break; }
+  if (!gp) { input.gpLeft = input.gpRight = input.gpDown = false; return; }
+  const b = i => !!(gp.buttons[i] && gp.buttons[i].pressed);
+  const ax = gp.axes[0] || 0, ay = gp.axes[1] || 0;
+  const edge = (k, v) => { const e = v && !gpPrev[k]; gpPrev[k] = v; return e; };
+  input.gpLeft = ax < -.4 || b(14);
+  input.gpRight = ax > .4 || b(15);
+  const down = ay > .6 || b(13);
+  if (edge('down', down) && pl) pl.dropBuf = BUFFER;
+  input.gpDown = down;
+  if (edge('jump', b(0) || b(12))) {   // A / D-pad lên
+    initAudio();
+    if (mode === 'play') jump(); else if (mode === 'menu' || mode === 'over') start(); else if (mode === 'pause') resume();
+  }
+  if (edge('dash', b(1) || b(2) || b(5) || b(7))) dash(inputDir() || pl.dir);   // B / X / RB / RT
+  if (edge('start', b(9))) { if (mode === 'play') pause(); else if (mode === 'pause') resume(); }
+}
+addEventListener('gamepadconnected', () => { setTouch(false); toast('🎮 Đã kết nối tay cầm'); });
 
 // ---------- Replay & quay clip ----------
 const rp = { i: 0, rt: 0, end: 0, record: false, rec: null, chunks: [] };
@@ -1009,8 +1137,11 @@ function makeCard() {
   const bg = g.createLinearGradient(0, 0, 0, 1350); bg.addColorStop(0, '#26164f'); bg.addColorStop(1, '#5a1830');
   g.fillStyle = bg; g.fillRect(0, 0, 1080, 1350);
   g.textAlign = 'center'; g.fillStyle = '#ffcf3f'; g.font = '900 120px system-ui'; g.fillText('NÉ ĐI!', 540, 160);
-  const sw = 500, sh = sw * H / W;
-  g.save(); g.shadowColor = '#000'; g.shadowBlur = 40; g.drawImage(cv, 60, 230, sw, sh); g.restore();
+  // Chỉ cắt phần khung chơi (bỏ 2 bên trang trí), giữ đúng tỉ lệ
+  let sw = 500, sh = sw * H / W;
+  if (sh > 1000) { sh = 1000; sw = sh * W / H; }
+  g.save(); g.shadowColor = '#000'; g.shadowBlur = 40;
+  g.drawImage(cv, offX * scale, 0, W * scale, H * scale, 60, 230, sw, sh); g.restore();
   g.strokeStyle = '#ffcf3f'; g.lineWidth = 6; g.strokeRect(60, 230, sw, sh);
   const r = lastResult.run, x = 820;
   g.fillStyle = '#c9c4ef'; g.font = 'bold 40px system-ui'; g.fillText('ĐIỂM', x, 320);
@@ -1035,13 +1166,20 @@ function toast(msg) {
 }
 
 // ---------- Input ----------
-wrap.addEventListener('pointerdown', e => {
+// Chạm bất kỳ đâu trên màn hình (trừ các nút) để nhảy
+addEventListener('pointerdown', e => {
+  if (e.target.closest && e.target.closest('button, #pad, #ctl, .overlay')) return;
   initAudio();
   if (mode === 'play') { jump(); e.preventDefault(); }
   else if (mode === 'replay' && !rp.record) rp.rt = rp.end;
 }, { passive: false });
 const HOLD_KEYS = { ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right', ArrowDown: 'down', KeyS: 'down' };
 addEventListener('keydown', e => {
+  if (e.code === 'KeyP' || e.code === 'Escape') {
+    if (mode === 'play') pause(); else if (mode === 'pause') resume();
+    return;
+  }
+  if (e.code === 'KeyF' && !e.repeat) { toggleFullscreen(); return; }
   if (HOLD_KEYS[e.code]) {
     e.preventDefault();
     if (HOLD_KEYS[e.code] === 'down' && !e.repeat && pl) pl.dropBuf = BUFFER;
@@ -1055,9 +1193,22 @@ addEventListener('keydown', e => {
   initAudio();
   if (mode === 'play') jump();
   else if (mode === 'menu' || mode === 'over') start();
+  else if (mode === 'pause') resume();
 });
 addEventListener('keyup', e => { if (HOLD_KEYS[e.code]) input[HOLD_KEYS[e.code]] = false; });
-addEventListener('blur', () => { input.left = input.right = input.down = false; });
+addEventListener('blur', () => { input.left = input.right = input.down = false; pause(); });
+
+// Chặn menu chuột phải, phóng to bằng 2 ngón (iOS) và nhấn giữ hiện menu
+cv.addEventListener('contextmenu', e => e.preventDefault());
+document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('dblclick', e => e.preventDefault());
+
+// Nút góc: không để chạm vào nút bị tính thành nhảy
+$('ctl').addEventListener('pointerdown', e => e.stopPropagation());
+$('bPause').onclick = () => { if (mode === 'play') pause(); else resume(); };
+$('bFull').onclick = toggleFullscreen;
+$('bResume').onclick = resume;
+$('bQuit').onclick = showMenu;
 
 // Nút cảm ứng: ◀ ▶ ▼ giữ để di chuyển, ▲ để nhảy
 document.querySelectorAll('#pad button').forEach(b => {
@@ -1088,8 +1239,17 @@ $('bShare').onclick = async () => shareOrDownload(await makeCard(), 'ne-di-' + l
 // Vật lý chạy bước cố định 1/120s để chuyển động đều trên mọi máy
 const STEP = 1 / 120;
 let last = performance.now(), acc = 0;
+let ftAvg = 16, slowFor = 0;
 function loop(now) {
-  const raw = Math.min(.033, (now - last) / 1000); last = now;
+  const ms = Math.min(100, now - last);
+  const raw = Math.min(.033, ms / 1000); last = now;
+  pollGamepad();
+  // Tự bật chế độ mượt nếu máy chạy chậm (< ~42 fps) liên tục 2 giây
+  if (mode === 'play' && !lowFx) {
+    ftAvg = ftAvg * .95 + ms * .05;
+    slowFor = ftAvg > 24 ? slowFor + raw : 0;
+    if (slowFor > 2) { lowFx = true; resize(); toast('⚡ Đã bật chế độ mượt cho máy yếu'); }
+  }
   if (mode === 'play' || mode === 'dying') {
     acc += raw * (slowT > 0 ? .35 : 1); slowT -= raw;
     for (let n = 0; acc >= STEP && n < 8; n++) { update(STEP); acc -= STEP; }

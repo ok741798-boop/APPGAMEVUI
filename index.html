@@ -2,8 +2,15 @@
 <html lang="vi">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#07060f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Né Đi!">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
 <title>Né Đi! – One Tap Survival</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -11,17 +18,37 @@
 <div id="wrap">
   <canvas id="c"></canvas>
 
+  <!-- NÚT GÓC: tạm dừng / toàn màn hình -->
+  <div id="ctl" class="hidden">
+    <button id="bPause" aria-label="Tạm dừng">⏸</button>
+    <button id="bFull" aria-label="Toàn màn hình">⛶</button>
+  </div>
+
   <!-- MENU -->
   <div id="menu" class="overlay">
     <div class="panel">
+     <div class="col">
       <h1>NÉ ĐI!</h1>
       <p class="tag">SINH TỒN CHỈ VỚI MỘT LẦN CHẠM</p>
-      <p class="sub">Đứng trên bục · <b>Chạm</b> để bật lên bục kế tiếp · Chạm lần nữa trên không để <b>nhảy đôi</b><br>Giữ <b>◀ ▶</b> để đi · <b>⚡</b> lướt né xuyên vật thể (phím Shift/K) · <b>▼</b> rơi xuyên bục / lao xuống (phím mũi tên hoặc WASD)<br>Né vật thể rơi · Đừng để <span class="hot">dung nham</span> đuổi kịp</p>
+      <p class="sub touch-only">Đứng trên bục · <b>Chạm</b> để bật lên bục kế tiếp · Chạm lần nữa trên không để <b>nhảy đôi</b><br>Giữ <b>◀ ▶</b> để đi · <b>⚡</b> lướt né xuyên vật thể · <b>▼</b> rơi xuyên bục / lao xuống<br>Né vật thể rơi · Đừng để <span class="hot">dung nham</span> đuổi kịp</p>
+      <p class="sub desk-only"><span class="key">Space</span>/<span class="key">↑</span> nhảy (2 lần = nhảy đôi) · <span class="key">←</span><span class="key">→</span> đi · <span class="key">Shift</span> lướt né · <span class="key">↓</span> rơi xuyên bục · <span class="key">P</span> tạm dừng<br>Có hỗ trợ <b>tay cầm</b> (gamepad) · Né vật thể rơi · Đừng để <span class="hot">dung nham</span> đuổi kịp</p>
+      <div class="best" id="mBest"></div>
+      <button id="bStart" class="primary"><span class="touch-only">CHẠM ĐỂ CHƠI</span><span class="desk-only">CHƠI (Space)</span></button>
+     </div>
+     <div class="col">
       <div class="legend" id="legend"></div>
       <div class="card" id="mDaily"></div>
-      <div class="best" id="mBest"></div>
-      <button id="bStart" class="primary">CHẠM ĐỂ CHƠI</button>
       <div class="titles" id="mTitles"></div>
+     </div>
+    </div>
+  </div>
+
+  <!-- TẠM DỪNG -->
+  <div id="pause" class="overlay hidden">
+    <div class="panel">
+      <h2>TẠM DỪNG</h2>
+      <button id="bResume" class="primary">Tiếp tục</button>
+      <button id="bQuit" class="ghost">Về menu</button>
     </div>
   </div>
 
@@ -44,21 +71,22 @@
     </div>
   </div>
 
-  <!-- NÚT ĐIỀU KHIỂN -->
-  <div id="pad" class="hidden">
-    <div class="grp">
-      <button data-k="left" aria-label="Trái">◀</button>
-      <button data-k="right" aria-label="Phải">▶</button>
-    </div>
-    <div class="grp">
-      <button data-k="dash" class="dash" aria-label="Lướt né">⚡</button>
-      <button data-k="down" aria-label="Xuống">▼</button>
-      <button data-k="up" class="jump" aria-label="Nhảy">▲</button>
-    </div>
-  </div>
-
   <div id="toast" class="hidden"></div>
 </div>
+
+<!-- NÚT ĐIỀU KHIỂN CẢM ỨNG (bám mép màn hình, tránh tai thỏ/thanh home) -->
+<div id="pad" class="hidden">
+  <div class="grp">
+    <button data-k="left" aria-label="Trái">◀</button>
+    <button data-k="right" aria-label="Phải">▶</button>
+  </div>
+  <div class="grp">
+    <button data-k="dash" class="dash" aria-label="Lướt né">⚡</button>
+    <button data-k="down" aria-label="Xuống">▼</button>
+    <button data-k="up" class="jump" aria-label="Nhảy">▲</button>
+  </div>
+</div>
+
 <script src="game.js"></script>
 </body>
 </html>
