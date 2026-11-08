@@ -195,6 +195,16 @@ body:not(.touch) .rot { display: none; }   /* xoay màn hình chỉ dành cho đ
   background: rgba(12, 8, 30, .55); border: 1px solid rgba(255, 255, 255, .22);
 }
 
+#musicHint {
+  position: fixed; z-index: 20; left: 50%; top: max(12px, env(safe-area-inset-top));
+  transform: translateX(-50%); pointer-events: none; white-space: nowrap;
+  padding: 8px 16px; border-radius: 99px; font-size: 14px; font-weight: 700;
+  background: rgba(255, 207, 63, .92); color: #2a1300;
+  box-shadow: 0 0 18px rgba(255, 160, 40, .5);
+  animation: blink 1.4s ease-in-out infinite;
+}
+@keyframes blink { 50% { opacity: .55; } }
+
 #toast {
   position: absolute; left: 50%; bottom: calc(6 * var(--q)); transform: translateX(-50%);
   background: rgba(0,0,0,.85); padding: calc(2 * var(--q)) calc(4 * var(--q)); border-radius: 99px;

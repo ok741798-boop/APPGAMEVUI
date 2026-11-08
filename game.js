@@ -1293,6 +1293,22 @@ $('bFull').onclick = toggleFullscreen;
 $('bZoom').onclick = $('bZoom2').onclick = cycleZoom;
 $('bMusic').onclick = $('bMusic2').onclick = () => { initAudio(); toggleMusic(); };
 musicLabel();
+
+// Vào game là phát nhạc luôn. Nếu trình duyệt chặn tự phát (chưa chạm lần nào),
+// hiện gợi ý và phát ngay ở lần chạm / bấm phím đầu tiên, ở bất kỳ đâu trên màn hình.
+const UNLOCK_EVENTS = ['pointerdown', 'touchstart', 'keydown'];
+function unlockMusic() {
+  initAudio();
+  UNLOCK_EVENTS.forEach(ev => removeEventListener(ev, unlockMusic, true));
+  $('musicHint').classList.add('hidden');
+}
+UNLOCK_EVENTS.forEach(ev => addEventListener(ev, unlockMusic, true));
+if (musicOn) {
+  bgm.volume = BGM_VOL.menu;
+  bgm.play()
+    .then(() => { bgmFade = 1; unlockMusic(); })
+    .catch(() => { $('musicHint').classList.remove('hidden'); });
+}
 $('bRot').onclick = $('bRot2').onclick = rotateScreen;
 updateZoomLabels();
 $('bResume').onclick = resume;
