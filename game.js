@@ -94,7 +94,34 @@ let ac = null;
 function initAudio() {
   if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
   if (ac && ac.state === 'suspended') ac.resume();
+  if (!bgmFade) { bgmFade = 1; bgm.volume = 0; if (musicOn) bgm.play().catch(() => {}); }
 }
+// ---------- Nhạc nền (music.mp3) ----------
+// Trình duyệt chỉ cho phát nhạc sau lần chạm/bấm đầu tiên, nên nhạc bắt đầu từ initAudio()
+const bgm = new Audio('music.mp3');
+bgm.loop = true; bgm.preload = 'auto';
+let musicOn = store.get('music', true);
+let bgmTarget = 0, bgmFade = 0;
+const BGM_VOL = { play: .55, menu: .3, pause: .12, over: .25 };
+function musicMood(m) { bgmTarget = musicOn ? (BGM_VOL[m] ?? .3) : 0; }
+function musicTick(dt) {   // gọi mỗi khung hình: chuyển âm lượng mượt giữa các màn
+  const v = bgm.volume + (bgmTarget - bgm.volume) * Math.min(1, dt * 4);
+  bgm.volume = clamp(v, 0, 1);
+  if (bgmTarget > 0 && bgm.paused && bgmFade) bgm.play().catch(() => {});
+  if (bgmTarget === 0 && bgm.volume < .01 && !bgm.paused) bgm.pause();
+}
+function musicLabel() {
+  const ic = musicOn ? '🔊' : '🔇';
+  $('bMusic').textContent = ic + ' Nhạc: ' + (musicOn ? 'Bật' : 'Tắt');
+  $('bMusic2').textContent = ic;
+}
+function toggleMusic() {
+  musicOn = !musicOn; store.set('music', musicOn);
+  musicMood(mode === 'play' || mode === 'dying' ? 'play' : mode); musicLabel();
+  if (musicOn) { bgmFade = 1; bgm.play().catch(() => {}); }
+  else bgm.pause();   // iPhone không cho chỉnh volume → tắt hẳn ngay
+}
+
 function sfx(f, d = .1, type = 'square', v = .05, slide = 0) {
   if (!ac) return;
   const o = ac.createOscillator(), g = ac.createGain(), now = ac.currentTime;
@@ -989,7 +1016,7 @@ function drawSides() {
 
 // ---------- Kết thúc lượt ----------
 function gameOver() {
-  mode = 'over'; playUI(false);
+  mode = 'over'; musicMood('over'); playUI(false);
   const score = curScore(), before = new Set(unlockedTitles());
   const newBest = score > stats.bestScore;
   stats.runs++; stats.dodges += run.dodges; stats.nears += run.nears;
@@ -1023,7 +1050,7 @@ function gameOver() {
 function currentTitle() { const u = unlockedTitles(); return u[u.length - 1] || 'Tân binh'; }
 
 function showMenu() {
-  mode = 'menu'; reset(); playUI(false); $('pause').classList.add('hidden');
+  mode = 'menu'; musicMood('menu'); reset(); playUI(false); $('pause').classList.add('hidden');
   $('over').classList.add('hidden'); $('menu').classList.remove('hidden');
   $('legend').innerHTML = Object.values(TYPES)
     .map(o => `<div><i style="background:${o.color};color:${o.color}"></i><span><b>${o.name}</b>${o.desc}</span></div>`).join('');
@@ -1034,7 +1061,7 @@ function showMenu() {
 }
 
 function start() {
-  initAudio(); reset(); mode = 'play';
+  initAudio(); reset(); mode = 'play'; musicMood('play');
   input.left = input.right = input.down = false;
   $('menu').classList.add('hidden'); $('over').classList.add('hidden'); playUI(true);
 }
@@ -1049,16 +1076,20 @@ function playUI(on) {
 // ---------- Tạm dừng (tự dừng khi chuyển tab / ẩn app / mất focus) ----------
 function pause() {
   if (mode !== 'play') return;
-  mode = 'pause'; input.left = input.right = input.down = false;
+  mode = 'pause'; musicMood('pause'); input.left = input.right = input.down = false;
   document.querySelectorAll('#pad button').forEach(b => b.classList.remove('on'));
   $('pad').classList.add('hidden'); $('pause').classList.remove('hidden');
 }
 function resume() {
   if (mode !== 'pause') return;
-  mode = 'play'; last = performance.now(); acc = 0;
+  mode = 'play'; musicMood('play'); last = performance.now(); acc = 0;
   $('pause').classList.add('hidden'); $('pad').classList.remove('hidden');
 }
-document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
+// Ẩn tab / chuyển app: tạm dừng game và tắt nhạc ngay; quay lại thì nhạc tự phát tiếp
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { pause(); bgm.pause(); }
+  else if (musicOn && bgmFade) bgm.play().catch(() => {});
+});
 
 // ---------- Toàn màn hình ----------
 const docEl = document.documentElement;
@@ -1260,6 +1291,8 @@ $('ctl').addEventListener('pointerdown', e => e.stopPropagation());
 $('bPause').onclick = () => { if (mode === 'play') pause(); else resume(); };
 $('bFull').onclick = toggleFullscreen;
 $('bZoom').onclick = $('bZoom2').onclick = cycleZoom;
+$('bMusic').onclick = $('bMusic2').onclick = () => { initAudio(); toggleMusic(); };
+musicLabel();
 $('bRot').onclick = $('bRot2').onclick = rotateScreen;
 updateZoomLabels();
 $('bResume').onclick = resume;
@@ -1326,7 +1359,7 @@ function loop(now) {
   const ms = Math.min(100, now - last);
   // Khung hình ~16.7ms bị nhiễu đồng hồ vài phần ms → làm tròn đúng 1/60s để vật lý chạy đều, không giật
   const raw = Math.abs(ms - 1000 / 60) < 1.5 ? 1 / 60 : Math.min(.033, ms / 1000); last = now;
-  pollGamepad();
+  pollGamepad(); musicTick(raw);
   // Máy chạy chậm (< ~42 fps) liên tục 2 giây → hạ một mức chất lượng (cao → vừa → thấp)
   if (mode === 'play' && tier < 2) {
     ftAvg = ftAvg * .95 + ms * .05;
